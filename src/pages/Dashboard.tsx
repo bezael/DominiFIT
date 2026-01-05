@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Dumbbell, Utensils, TrendingUp, ChevronRight, Sparkles, Clock, Lock } from "lucide-react";
+import { Dumbbell, Utensils, TrendingUp, ChevronRight, Sparkles, Clock, Lock, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import MobileFrame from "@/components/MobileFrame";
+import { useAuth } from "@/hooks/use-auth";
+import { toast } from "sonner";
 
 type TabType = "training" | "nutrition" | "progress";
 
@@ -27,8 +29,20 @@ const mockMeals = [
 
 const Dashboard = () => {
   const navigate = useNavigate();
+  const { user, signOut } = useAuth();
   const [activeTab, setActiveTab] = useState<TabType>("training");
   const [showPremiumModal, setShowPremiumModal] = useState(false);
+  const [showLogoutMenu, setShowLogoutMenu] = useState(false);
+
+  const handleLogout = async () => {
+    try {
+      await signOut();
+      toast.success("Sesión cerrada correctamente");
+      navigate("/auth");
+    } catch (error: any) {
+      toast.error("Error al cerrar sesión: " + (error.message || "Intenta de nuevo"));
+    }
+  };
 
   const tabs = [
     { id: "training" as TabType, label: "Entreno", icon: Dumbbell },
@@ -45,19 +59,45 @@ const Dashboard = () => {
         {/* Header */}
         <div className="px-6 py-4 border-b border-border">
           <div className="flex items-center justify-between mb-4">
-            <div>
+            <div className="flex-1">
               <p className="text-sm text-muted-foreground">Semana 1</p>
               <h1 className="text-xl font-bold">Tu plan</h1>
+              {user?.email && (
+                <p className="text-xs text-muted-foreground mt-0.5">{user.email}</p>
+              )}
             </div>
-            <Button 
-              variant="premium" 
-              size="sm"
-              onClick={() => setShowPremiumModal(true)}
-              className="gap-2"
-            >
-              <Sparkles className="w-4 h-4" />
-              Regenerar
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button 
+                variant="premium" 
+                size="sm"
+                onClick={() => setShowPremiumModal(true)}
+                className="gap-2"
+              >
+                <Sparkles className="w-4 h-4" />
+                Regenerar
+              </Button>
+              <div className="relative">
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => setShowLogoutMenu(!showLogoutMenu)}
+                  className="gap-2"
+                >
+                  <LogOut className="w-4 h-4" />
+                </Button>
+                {showLogoutMenu && (
+                  <div className="absolute right-0 top-full mt-2 bg-card border border-border rounded-lg shadow-lg p-2 min-w-[150px] z-50">
+                    <button
+                      onClick={handleLogout}
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-accent rounded-md transition-colors flex items-center gap-2"
+                    >
+                      <LogOut className="w-4 h-4" />
+                      Cerrar sesión
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
 
           {/* Tabs */}
@@ -211,6 +251,14 @@ const Dashboard = () => {
             </div>
           )}
         </div>
+
+        {/* Click outside to close logout menu */}
+        {showLogoutMenu && (
+          <div 
+            className="fixed inset-0 z-40" 
+            onClick={() => setShowLogoutMenu(false)}
+          />
+        )}
 
         {/* Premium Modal */}
         {showPremiumModal && (

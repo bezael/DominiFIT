@@ -1,7 +1,10 @@
-import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Check, Sparkles, Zap, RefreshCw, History } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import MobileFrame from "@/components/MobileFrame";
+import { Button } from "@/components/ui/button";
+import { createCheckoutSession, redirectToCheckout } from "@/lib/stripe";
+import { supabase } from "@/lib/supabase";
+import { ArrowLeft, History, RefreshCw, Sparkles, Zap } from "lucide-react";
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 const benefits = [
@@ -13,12 +16,50 @@ const benefits = [
 
 const Paywall = () => {
   const navigate = useNavigate();
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubscribe = () => {
-    toast.success("¡Modo demo!", {
-      description: "En producción, aquí irías al checkout de pago."
-    });
-    navigate("/dashboard");
+  // ID del precio de Stripe - reemplázalo con tu Price ID real
+  const STRIPE_PRICE_ID = import.meta.env.VITE_STRIPE_PRICE_ID || "price_1234567890";
+
+  const handleSubscribe = async () => {
+    setIsLoading(true);
+
+    try {
+      // Obtener el usuario actual de Supabase
+      const { data: { user } } = await supabase.auth.getUser();
+      const userId = user?.id;
+
+      // Crear sesión de checkout y obtener la URL
+      console.log("Creating checkout session with:", {
+        priceId: STRIPE_PRICE_ID,
+        userId,
+        successUrl: `${window.location.origin}/dashboard?session_id={CHECKOUT_SESSION_ID}`,
+        cancelUrl: `${window.location.origin}/paywall`,
+      });
+
+      const checkoutUrl = await createCheckoutSession({
+        priceId: STRIPE_PRICE_ID,
+        userId,
+        successUrl: `${window.location.origin}/dashboard?session_id={CHECKOUT_SESSION_ID}`,
+        cancelUrl: `${window.location.origin}/paywall`,
+      });
+
+      console.log("Checkout URL received:", checkoutUrl);
+
+      // Validar que la URL sea válida antes de redirigir
+      if (!checkoutUrl || !checkoutUrl.startsWith('https://checkout.stripe.com/')) {
+        throw new Error(`URL de checkout inválida: ${checkoutUrl}`);
+      }
+
+      // Redirigir a Stripe Checkout usando redirección manual
+      redirectToCheckout(checkoutUrl);
+    } catch (error) {
+      console.error("Error en checkout:", error);
+      toast.error("Error al procesar el pago", {
+        description: error instanceof Error ? error.message : "Por favor, intenta de nuevo más tarde.",
+      });
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -77,8 +118,9 @@ const Paywall = () => {
             variant="premium" 
             size="full"
             onClick={handleSubscribe}
+            disabled={isLoading}
           >
-            Probar Premium
+            {isLoading ? "Procesando..." : "Probar Premium"}
           </Button>
           
           <Button 
