@@ -71,3 +71,17 @@ Yes, you can!
 To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
 
 Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+
+
+** Todo ****
+
+Quiero agregarle seccion de suplementos y podemos utilizar products afiliados de amazon.
+creatina y demas
+
+
+
+
+
+[] - Telegram API
+[] - ChatGPT API
+[] - Tablas de Supabase

@@ -4,6 +4,8 @@ import { Dumbbell, Utensils, TrendingUp, ChevronRight, Sparkles, Clock, Lock, Lo
 import { Button } from "@/components/ui/button";
 import MobileFrame from "@/components/MobileFrame";
 import { useAuth } from "@/hooks/use-auth";
+import { useMembership } from "@/hooks/use-membership";
+import { syncSubscriptionWithStripe } from "@/lib/membership";
 import { toast } from "sonner";
 
 type TabType = "training" | "nutrition" | "progress";
@@ -31,16 +33,22 @@ const Dashboard = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user, signOut } = useAuth();
+  const { 
+    hasActiveMembership: isPremium, 
+    membershipStatus, 
+    subscription,
+    refresh: refreshMembership,
+    loading: membershipLoading 
+  } = useMembership();
   const [activeTab, setActiveTab] = useState<TabType>("training");
   const [showPremiumModal, setShowPremiumModal] = useState(false);
   const [showLogoutMenu, setShowLogoutMenu] = useState(false);
-  const [isPremium, setIsPremium] = useState(false);
 
   // Verificar si hay session_id en la URL (viene de Stripe después del pago)
   useEffect(() => {
     const sessionId = searchParams.get('session_id');
     if (sessionId) {
-      // Pago exitoso - verificar suscripción y mostrar mensaje
+      // Pago exitoso - esperar a que el webhook procese y luego refrescar
       handlePaymentSuccess(sessionId);
       // Limpiar el parámetro de la URL
       setSearchParams({});
@@ -49,13 +57,42 @@ const Dashboard = () => {
 
   const handlePaymentSuccess = async (sessionId: string) => {
     try {
-      // Aquí deberías verificar la suscripción con tu backend
-      // Por ahora, asumimos que el pago fue exitoso
-      setIsPremium(true);
-      toast.success("¡Pago exitoso! Ya eres Premium", {
-        description: "Disfruta de todas las funciones premium",
-        duration: 5000,
-      });
+      // Esperar un momento para que el webhook procese el evento
+      // En producción, podrías hacer polling o usar Supabase Realtime
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Refrescar el estado de membresía
+      await refreshMembership();
+
+      // Si ahora tiene membresía activa, mostrar éxito
+      if (isPremium || membershipStatus?.hasActiveMembership) {
+        toast.success("¡Pago exitoso! Ya eres Premium", {
+          description: "Disfruta de todas las funciones premium",
+          duration: 5000,
+        });
+      } else {
+        // Si aún no tiene membresía, intentar sincronizar manualmente
+        if (subscription?.stripe_subscription_id) {
+          const synced = await syncSubscriptionWithStripe(subscription.stripe_subscription_id);
+          if (synced) {
+            await refreshMembership();
+            toast.success("¡Pago exitoso! Ya eres Premium", {
+              description: "Disfruta de todas las funciones premium",
+              duration: 5000,
+            });
+          } else {
+            toast.info("Pago procesado", {
+              description: "Tu membresía se activará en unos momentos. Si el problema persiste, contacta al soporte.",
+              duration: 5000,
+            });
+          }
+        } else {
+          toast.info("Pago procesado", {
+            description: "Tu membresía se activará en unos momentos. Si el problema persiste, contacta al soporte.",
+            duration: 5000,
+          });
+        }
+      }
     } catch (error) {
       console.error("Error al verificar pago:", error);
       toast.error("Error al verificar el pago", {
@@ -97,7 +134,9 @@ const Dashboard = () => {
               )}
             </div>
             <div className="flex items-center gap-2">
-              {isPremium ? (
+              {membershipLoading ? (
+                <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              ) : isPremium ? (
                 <Button 
                   variant="premium" 
                   size="sm"
