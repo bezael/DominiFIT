@@ -67,7 +67,7 @@ export async function generateWeeklyPlan(
     training: {
       weeklyStructure: trainingTemplate?.weeklyStructure || [],
       totalVolume: {},
-      progression: trainingTemplate?.progression.week1 || "",
+      progression: trainingTemplate?.progression?.week1 || "",
     },
     nutrition: {
       dailyCalories,
@@ -130,7 +130,17 @@ export async function generateWeeklyPlan(
         }
       }
 
-      if (aiResponse.nutrition) {
+      if (aiResponse.nutrition && aiResponse.nutrition.weeklyMenu && aiResponse.nutrition.weeklyMenu.length > 0) {
+        console.log("🥗 [generateWeeklyPlan] Fusionando nutrición de IA:", {
+          weeklyMenuLength: aiResponse.nutrition.weeklyMenu.length,
+          weeklyMenuDays: aiResponse.nutrition.weeklyMenu.map(d => ({
+            day: d.day,
+            totalCalories: d.totalCalories,
+            mealsCount: d.meals?.length || 0
+          })),
+          hasMealPrepTips: !!aiResponse.nutrition.mealPrepTips
+        });
+        
         plan.nutrition.weeklyMenu = aiResponse.nutrition.weeklyMenu;
         plan.nutrition.mealPrepTips = aiResponse.nutrition.mealPrepTips;
 
@@ -144,10 +154,21 @@ export async function generateWeeklyPlan(
             fat: firstDay.fat,
           };
         }
+      } else {
+        console.warn("⚠️ [generateWeeklyPlan] La respuesta de IA no incluye nutrición válida:", {
+          hasNutrition: !!aiResponse.nutrition,
+          hasWeeklyMenu: !!aiResponse.nutrition?.weeklyMenu,
+          weeklyMenuLength: aiResponse.nutrition?.weeklyMenu?.length || 0
+        });
+        // Si no hay nutrición de IA, mantener la de la plantilla o valores por defecto
+        if (!nutritionTemplate || plan.nutrition.weeklyMenu.length === 0) {
+          console.log("🔧 [generateWeeklyPlan] Usando nutrición por defecto");
+          // La nutrición ya tiene valores por defecto del plan base
+        }
       }
 
       plan.metadata.generatedBy = "ai";
-      plan.metadata.aiModel = "gpt-5-nano";
+      plan.metadata.aiModel = "gpt-4.1-mini";
     } catch (error) {
       console.error("Error al generar con IA, usando solo plantillas:", error);
       // Continuar con plantillas si IA falla
@@ -189,6 +210,37 @@ export async function generateWeeklyPlan(
 
   // 8. Metadata final
   plan.metadata.generationTime = Date.now() - startTime;
+
+  // 9. Validación final: asegurar que training tenga estructura válida
+  if (!plan.training.weeklyStructure || plan.training.weeklyStructure.length === 0) {
+    console.warn("⚠️ [generateWeeklyPlan] Plan sin entrenos, generando fallback...");
+    plan.training.weeklyStructure = generateBasicWorkouts(preferences);
+    plan.training.totalVolume = calculateMuscleGroupVolume(plan.training.weeklyStructure);
+  }
+
+  // 10. Validación final: asegurar que nutrition tenga estructura válida
+  if (!plan.nutrition.weeklyMenu || plan.nutrition.weeklyMenu.length === 0) {
+    console.warn("⚠️ [generateWeeklyPlan] Plan sin nutrición, usando valores por defecto...");
+    // La nutrición ya tiene valores por defecto del plan base (dailyCalories, macroTargets)
+    // Pero necesitamos al menos un menú básico
+    if (!plan.nutrition.weeklyMenu) {
+      plan.nutrition.weeklyMenu = [];
+    }
+  }
+
+  console.log("✅ [generateWeeklyPlan] Plan final generado:", {
+    id: plan.id,
+    trainingDays: plan.training.weeklyStructure.length,
+    hasNutrition: !!plan.nutrition,
+    nutritionDays: plan.nutrition?.weeklyMenu?.length || 0,
+    nutritionWeeklyMenu: plan.nutrition?.weeklyMenu?.map(d => ({
+      day: d.day,
+      totalCalories: d.totalCalories,
+      mealsCount: d.meals?.length || 0
+    })) || [],
+    validationPassed: plan.validation.passed,
+    generatedBy: plan.metadata.generatedBy
+  });
 
   return plan;
 }
@@ -243,7 +295,16 @@ export async function regeneratePlan(
   }
 
   // 5. Aplicar cambios de nutrición
-  if (aiResponse.nutrition) {
+  if (aiResponse.nutrition && aiResponse.nutrition.weeklyMenu && aiResponse.nutrition.weeklyMenu.length > 0) {
+    console.log("🥗 [regeneratePlan] Fusionando nutrición regenerada:", {
+      weeklyMenuLength: aiResponse.nutrition.weeklyMenu.length,
+      weeklyMenuDays: aiResponse.nutrition.weeklyMenu.map(d => ({
+        day: d.day,
+        totalCalories: d.totalCalories,
+        mealsCount: d.meals?.length || 0
+      }))
+    });
+    
     regeneratedPlan.nutrition.weeklyMenu = aiResponse.nutrition.weeklyMenu;
     regeneratedPlan.nutrition.mealPrepTips = aiResponse.nutrition.mealPrepTips;
 
@@ -281,6 +342,13 @@ export async function regeneratePlan(
         constraints.maxCarbs
       );
     }
+  } else {
+    console.warn("⚠️ [regeneratePlan] La respuesta de IA no incluye nutrición válida, manteniendo nutrición existente:", {
+      hasNutrition: !!aiResponse.nutrition,
+      hasWeeklyMenu: !!aiResponse.nutrition?.weeklyMenu,
+      weeklyMenuLength: aiResponse.nutrition?.weeklyMenu?.length || 0,
+      existingNutritionDays: regeneratedPlan.nutrition?.weeklyMenu?.length || 0
+    });
   }
 
   // 6. Validar plan regenerado
@@ -306,7 +374,7 @@ export async function regeneratePlan(
 
   // 8. Metadata
   regeneratedPlan.metadata.generatedBy = "ai";
-  regeneratedPlan.metadata.aiModel = "gpt-5-nano";
+  regeneratedPlan.metadata.aiModel = "gpt-4.1-mini";
   regeneratedPlan.metadata.generationTime = Date.now() - startTime;
 
   return regeneratedPlan;

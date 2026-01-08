@@ -292,7 +292,7 @@ export async function generatePlanWithAI(
         Authorization: `Bearer ${OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "gpt-5-nano", // o "gpt-4" para mejor calidad
+        model: "gpt-4.1-mini", // NOTA: Verifica que este modelo exista en tu API. Modelos estándar: "gpt-4o-mini", "gpt-4", "gpt-3.5-turbo"
         messages: [
           {
             role: "system",
@@ -303,30 +303,94 @@ export async function generatePlanWithAI(
             content: prompt,
           },
         ],
-        max_completion_tokens: 4000,
+        max_tokens: 4000,
         response_format: { type: "json_object" }, // Fuerza respuesta JSON
       }),
     });
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
+      let errorData;
+      try {
+        errorData = await response.json();
+      } catch (e) {
+        const textError = await response.text().catch(() => "No se pudo leer el error");
+        console.error("❌ [generatePlanWithAI] Error en respuesta de OpenAI (texto):", textError);
+        throw new Error(
+          `Error en API de OpenAI: ${response.status} - ${response.statusText}. Respuesta: ${textError.substring(0, 500)}`
+        );
+      }
+      console.error("❌ [generatePlanWithAI] Error en respuesta de OpenAI:", errorData);
       throw new Error(
-        `Error en API de OpenAI: ${response.status} - ${errorData.error?.message || response.statusText}`
+        `Error en API de OpenAI: ${response.status} - ${errorData.error?.message || errorData.message || response.statusText}`
       );
     }
 
-    const data = await response.json();
+    let data;
+    try {
+      data = await response.json();
+    } catch (error) {
+      const textResponse = await response.text().catch(() => "No se pudo leer la respuesta");
+      console.error("❌ [generatePlanWithAI] Error al parsear JSON de respuesta:", {
+        error,
+        textResponse: textResponse.substring(0, 500)
+      });
+      throw new Error(`Error al parsear respuesta de OpenAI: ${error instanceof Error ? error.message : "Error desconocido"}`);
+    }
+    
+    console.log("📥 [generatePlanWithAI] Respuesta completa de OpenAI:", {
+      hasChoices: !!data.choices,
+      choicesLength: data.choices?.length || 0,
+      firstChoice: data.choices?.[0],
+      message: data.choices?.[0]?.message,
+      usage: data.usage,
+      error: data.error,
+      fullResponse: data
+    });
+
     const content = data.choices[0]?.message?.content;
 
+    console.log("✅ [generatePlanWithAI] Contenido recibido:", {
+      hasContent: !!content,
+      contentLength: content?.length || 0,
+      contentType: typeof content,
+      contentPreview: content ? content.substring(0, 200) : null,
+    });
+
     if (!content) {
-      throw new Error("No se recibió contenido de la API");
+      console.error("❌ [generatePlanWithAI] No se recibió contenido. Estructura de respuesta:", {
+        dataKeys: Object.keys(data),
+        choices: data.choices,
+        error: data.error,
+        fullData: JSON.stringify(data).substring(0, 1000)
+      });
+      throw new Error(`No se recibió contenido de la API. Respuesta: ${JSON.stringify(data).substring(0, 500)}`);
     }
 
-    // Extraer JSON del contenido (por si viene con markdown)
+    // Cuando se usa response_format: { type: "json_object" }, el contenido ya debería ser JSON puro
+    let jsonString = content;
+    
+    // Intentar extraer JSON si viene envuelto en markdown
     const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/) || content.match(/\{[\s\S]*\}/);
-    const jsonString = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : content;
+    if (jsonMatch) {
+      jsonString = jsonMatch[1] || jsonMatch[0];
+    }
 
-    const aiResponse: AIResponse = JSON.parse(jsonString);
+    console.log("🔍 [generatePlanWithAI] Parseando JSON...", {
+      jsonStringLength: jsonString.length,
+      jsonStringPreview: jsonString.substring(0, 200),
+      isJSON: jsonString.trim().startsWith('{')
+    });
+
+    let aiResponse: AIResponse;
+    try {
+      aiResponse = JSON.parse(jsonString);
+    } catch (parseError) {
+      console.error("❌ [generatePlanWithAI] Error al parsear JSON:", {
+        error: parseError,
+        jsonString: jsonString.substring(0, 500)
+      });
+      throw new Error(`Error al parsear JSON de la respuesta: ${parseError instanceof Error ? parseError.message : "Error desconocido"}`);
+    }
 
     console.log("✅ [generatePlanWithAI] Plan generado por IA:", {
       hasTraining: !!aiResponse.training,
@@ -337,7 +401,17 @@ export async function generatePlanWithAI(
         day: d.day,
         name: d.name,
         exercisesCount: d.exercises?.length || 0
-      })) || []
+      })) || [],
+      nutritionStructure: aiResponse.nutrition?.weeklyMenu?.map(d => ({
+        day: d.day,
+        totalCalories: d.totalCalories,
+        mealsCount: d.meals?.length || 0,
+        protein: d.protein,
+        carbs: d.carbs,
+        fat: d.fat
+      })) || [],
+      hasMealPrepTips: !!aiResponse.nutrition?.mealPrepTips,
+      mealPrepTipsCount: aiResponse.nutrition?.mealPrepTips?.length || 0
     });
 
     return aiResponse;
@@ -376,12 +450,12 @@ export async function regeneratePlanWithAI(
   try {
     console.log("📤 [regeneratePlanWithAI] Enviando petición a OpenAI API...", {
       url: OPENAI_API_URL,
-      model: "gpt-5-nano",
+      model: "gpt-4.1-mini",
       promptLength: prompt.length,
     });
     
     const requestBody = {
-      model: "gpt-5-nano",
+      model: "gpt-4.1-mini", // NOTA: Verifica que este modelo exista en tu API. Modelos estándar: "gpt-4o-mini", "gpt-4", "gpt-3.5-turbo"
       messages: [
         {
           role: "system",
@@ -392,7 +466,7 @@ export async function regeneratePlanWithAI(
           content: prompt,
         },
       ],
-      max_completion_tokens: 4000,
+      max_tokens: 4000,
       response_format: { type: "json_object" },
     };
 
@@ -412,37 +486,103 @@ export async function regeneratePlanWithAI(
     });
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
+      let errorData;
+      try {
+        errorData = await response.json();
+      } catch (e) {
+        const textError = await response.text().catch(() => "No se pudo leer el error");
+        console.error("❌ [regeneratePlanWithAI] Error en respuesta de OpenAI (texto):", textError);
+        throw new Error(
+          `Error en API de OpenAI: ${response.status} - ${response.statusText}. Respuesta: ${textError.substring(0, 500)}`
+        );
+      }
       console.error("❌ [regeneratePlanWithAI] Error en respuesta de OpenAI:", errorData);
       throw new Error(
-        `Error en API de OpenAI: ${response.status} - ${errorData.error?.message || response.statusText}`
+        `Error en API de OpenAI: ${response.status} - ${errorData.error?.message || errorData.message || response.statusText}`
       );
     }
 
-    const data = await response.json();
+    let data;
+    try {
+      data = await response.json();
+    } catch (error) {
+      const textResponse = await response.text().catch(() => "No se pudo leer la respuesta");
+      console.error("❌ [regeneratePlanWithAI] Error al parsear JSON de respuesta:", {
+        error,
+        textResponse: textResponse.substring(0, 500)
+      });
+      throw new Error(`Error al parsear respuesta de OpenAI: ${error instanceof Error ? error.message : "Error desconocido"}`);
+    }
+    
+    console.log("📥 [regeneratePlanWithAI] Respuesta completa de OpenAI:", {
+      hasChoices: !!data.choices,
+      choicesLength: data.choices?.length || 0,
+      firstChoice: data.choices?.[0],
+      message: data.choices?.[0]?.message,
+      usage: data.usage,
+      fullResponse: data
+    });
+
     const content = data.choices[0]?.message?.content;
 
     console.log("✅ [regeneratePlanWithAI] Contenido recibido:", {
       hasContent: !!content,
       contentLength: content?.length || 0,
+      contentType: typeof content,
+      contentPreview: content ? content.substring(0, 200) : null,
       usage: data.usage,
     });
 
     if (!content) {
-      throw new Error("No se recibió contenido de la API");
+      console.error("❌ [regeneratePlanWithAI] No se recibió contenido. Estructura de respuesta:", {
+        dataKeys: Object.keys(data),
+        choices: data.choices,
+        error: data.error
+      });
+      throw new Error(`No se recibió contenido de la API. Respuesta: ${JSON.stringify(data).substring(0, 500)}`);
     }
 
+    // Cuando se usa response_format: { type: "json_object" }, el contenido ya debería ser JSON puro
+    let jsonString = content;
+    
+    // Intentar extraer JSON si viene envuelto en markdown
     const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/) || content.match(/\{[\s\S]*\}/);
-    const jsonString = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : content;
+    if (jsonMatch) {
+      jsonString = jsonMatch[1] || jsonMatch[0];
+    }
 
-    console.log("🔍 [regeneratePlanWithAI] Parseando JSON...");
-    const aiResponse: AIResponse = JSON.parse(jsonString);
+    console.log("🔍 [regeneratePlanWithAI] Parseando JSON...", {
+      jsonStringLength: jsonString.length,
+      jsonStringPreview: jsonString.substring(0, 200),
+      isJSON: jsonString.trim().startsWith('{')
+    });
+
+    let aiResponse: AIResponse;
+    try {
+      aiResponse = JSON.parse(jsonString);
+    } catch (parseError) {
+      console.error("❌ [regeneratePlanWithAI] Error al parsear JSON:", {
+        error: parseError,
+        jsonString: jsonString.substring(0, 500)
+      });
+      throw new Error(`Error al parsear JSON de la respuesta: ${parseError instanceof Error ? parseError.message : "Error desconocido"}`);
+    }
     
     console.log("✨ [regeneratePlanWithAI] Plan regenerado exitosamente:", {
       hasTraining: !!aiResponse.training,
       hasNutrition: !!aiResponse.nutrition,
       trainingDays: aiResponse.training?.weeklyStructure?.length || 0,
       nutritionDays: aiResponse.nutrition?.weeklyMenu?.length || 0,
+      nutritionStructure: aiResponse.nutrition?.weeklyMenu?.map(d => ({
+        day: d.day,
+        totalCalories: d.totalCalories,
+        mealsCount: d.meals?.length || 0,
+        protein: d.protein,
+        carbs: d.carbs,
+        fat: d.fat
+      })) || [],
+      hasMealPrepTips: !!aiResponse.nutrition?.mealPrepTips,
+      mealPrepTipsCount: aiResponse.nutrition?.mealPrepTips?.length || 0
     });
 
     return aiResponse;

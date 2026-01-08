@@ -64,6 +64,32 @@ const Loading = () => {
           generatedBy: plan.metadata.generatedBy,
         });
 
+        // Verificar estructura del plan antes de guardar
+        console.log("🔍 [Loading] Verificando plan antes de guardar:", {
+          hasTraining: !!plan.training,
+          hasWeeklyStructure: !!plan.training?.weeklyStructure,
+          weeklyStructureLength: plan.training?.weeklyStructure?.length || 0,
+          trainingDays: plan.training?.weeklyStructure?.map(d => ({
+            day: d.day,
+            name: d.name,
+            exercisesCount: d.exercises?.length || 0
+          })) || [],
+          hasNutrition: !!plan.nutrition,
+          hasWeeklyMenu: !!plan.nutrition?.weeklyMenu,
+          nutritionDays: plan.nutrition?.weeklyMenu?.length || 0,
+          nutritionWeeklyMenu: plan.nutrition?.weeklyMenu?.map(d => ({
+            day: d.day,
+            totalCalories: d.totalCalories,
+            mealsCount: d.meals?.length || 0,
+            protein: d.protein,
+            carbs: d.carbs,
+            fat: d.fat
+          })) || [],
+          dailyCalories: plan.nutrition?.dailyCalories,
+          macroTargets: plan.nutrition?.macroTargets,
+          hasMealPrepTips: !!plan.nutrition?.mealPrepTips
+        });
+
         // Guardar plan en Supabase
         const { data: savedPlan, error: saveError } = await savePlan(plan);
 
