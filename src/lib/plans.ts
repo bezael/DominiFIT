@@ -110,36 +110,34 @@ export async function getLatestPlan(userId: string): Promise<{ data: WeeklyPlan 
       .select('*')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
+      .limit(1);
 
     if (error) {
-      // Si no hay plan, no es un error crítico
-      if (error.code === 'PGRST116') {
-        console.log('ℹ️ [getLatestPlan] No se encontró ningún plan para el usuario');
-        return { data: null, error: null };
-      }
       console.error('❌ [getLatestPlan] Error al obtener plan:', error);
       return { data: null, error: new Error(`Error al obtener plan: ${error.message}`) };
     }
 
-    if (!data) {
+    if (!data || data.length === 0) {
+      console.log('ℹ️ [getLatestPlan] No se encontró ningún plan para el usuario');
       return { data: null, error: null };
     }
 
+    // Tomar el primer resultado (ya está ordenado por created_at DESC)
+    const planData = data[0];
+
     // Convertir a WeeklyPlan
     const plan: WeeklyPlan = {
-      id: data.id,
-      userId: data.user_id,
-      weekNumber: data.week_number,
-      createdAt: data.created_at,
-      version: data.version,
-      preferences: data.preferences,
-      constraints: data.constraints,
-      training: data.training,
-      nutrition: data.nutrition,
-      validation: data.validation,
-      metadata: data.metadata,
+      id: planData.id,
+      userId: planData.user_id,
+      weekNumber: planData.week_number,
+      createdAt: planData.created_at,
+      version: planData.version,
+      preferences: planData.preferences,
+      constraints: planData.constraints,
+      training: planData.training,
+      nutrition: planData.nutrition,
+      validation: planData.validation,
+      metadata: planData.metadata,
     };
 
     console.log('✅ [getLatestPlan] Plan encontrado:', {

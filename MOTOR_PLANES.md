@@ -580,7 +580,7 @@ interface WeeklyPlan {
   // Metadata técnica
   metadata: {
     generatedBy: "template" | "ai" | "hybrid";
-    aiModel?: string;              // "gpt-4o-mini"
+    aiModel?: string;              // "gpt-5-nano"
     templateIds?: string[];         // IDs de plantillas usadas
     generationTime?: number;        // ms
   };
@@ -708,11 +708,11 @@ interface WeeklyPlan {
 #### 2. Rate Limiting
 - ⚠️ **Considerar límites**: OpenAI tiene límites de requests/minuto
 - 💡 **Solución**: Implementar caché de resultados similares
-- 💡 **Solución**: Usar `gpt-4o-mini` para reducir costos y aumentar velocidad
+- 💡 **Solución**: Usar `gpt-5-nano` para reducir costos y aumentar velocidad
 
 #### 3. Costos
 - 💰 **Optimización**: Usar plantillas cuando sea posible (sin costo)
-- 💰 **Modelos**: `gpt-4o-mini` es más económico que `gpt-4`
+- 💰 **Modelos**: `gpt-5-nano` es más económico que `gpt-4`
 - 💰 **Tokens**: Limitar `max_tokens` a lo necesario (4000 es suficiente)
 
 #### 4. Seguridad de Datos

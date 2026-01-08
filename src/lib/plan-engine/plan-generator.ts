@@ -10,7 +10,8 @@ import {
   ExperienceLevel,
   RegenerationConstraints,
   UserPreferences,
-  WeeklyPlan
+  WeeklyPlan,
+  WorkoutDay
 } from "./types";
 import { autoFixPlan, defaultValidationRules, isPlanValid, validatePlan } from "./validations";
 
@@ -108,9 +109,25 @@ export async function generateWeeklyPlan(
       });
 
       // Fusionar respuesta de IA con plan base
-      if (aiResponse.training) {
+      if (aiResponse.training && aiResponse.training.weeklyStructure && aiResponse.training.weeklyStructure.length > 0) {
+        console.log("💪 [generateWeeklyPlan] Fusionando entrenos de IA:", {
+          trainingDays: aiResponse.training.weeklyStructure.length,
+          structure: aiResponse.training.weeklyStructure.map(d => ({
+            day: d.day,
+            name: d.name,
+            exercisesCount: d.exercises?.length || 0,
+            focus: d.focus
+          }))
+        });
         plan.training.weeklyStructure = aiResponse.training.weeklyStructure;
-        plan.training.progression = aiResponse.training.progression;
+        plan.training.progression = aiResponse.training.progression || "";
+      } else {
+        console.warn("⚠️ [generateWeeklyPlan] La respuesta de IA no incluye entrenos válidos, usando plantilla o fallback");
+        // Si no hay entrenos de IA y tampoco hay plantilla, crear entrenos básicos
+        if (!trainingTemplate || plan.training.weeklyStructure.length === 0) {
+          console.log("🔧 [generateWeeklyPlan] Generando entrenos básicos de fallback");
+          plan.training.weeklyStructure = generateBasicWorkouts(preferences);
+        }
       }
 
       if (aiResponse.nutrition) {
@@ -130,7 +147,7 @@ export async function generateWeeklyPlan(
       }
 
       plan.metadata.generatedBy = "ai";
-      plan.metadata.aiModel = "gpt-4o-mini";
+      plan.metadata.aiModel = "gpt-5-nano";
     } catch (error) {
       console.error("Error al generar con IA, usando solo plantillas:", error);
       // Continuar con plantillas si IA falla
@@ -138,6 +155,15 @@ export async function generateWeeklyPlan(
   }
 
   // 5. Calcular volumen total por grupo muscular
+  console.log("📊 [generateWeeklyPlan] Plan antes de calcular volumen:", {
+    weeklyStructureLength: plan.training.weeklyStructure.length,
+    weeklyStructure: plan.training.weeklyStructure.map(d => ({
+      day: d.day,
+      name: d.name,
+      exercisesCount: d.exercises?.length || 0
+    }))
+  });
+  
   plan.training.totalVolume = calculateMuscleGroupVolume(plan.training.weeklyStructure);
 
   // 6. Validar plan
@@ -280,7 +306,7 @@ export async function regeneratePlan(
 
   // 8. Metadata
   regeneratedPlan.metadata.generatedBy = "ai";
-  regeneratedPlan.metadata.aiModel = "gpt-4o-mini";
+  regeneratedPlan.metadata.aiModel = "gpt-5-nano";
   regeneratedPlan.metadata.generationTime = Date.now() - startTime;
 
   return regeneratedPlan;
@@ -293,6 +319,84 @@ export async function regeneratePlan(
 /**
  * Calcula el volumen total (series) por grupo muscular
  */
+/**
+ * Genera entrenos básicos de fallback cuando OpenAI no genera entrenos
+ */
+function generateBasicWorkouts(preferences: UserPreferences): WorkoutDay[] {
+  const weekDays = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+  const workouts: WorkoutDay[] = [];
+  const daysPerWeek = preferences.daysPerWeek;
+  
+  // Distribuir días de entrenamiento a lo largo de la semana
+  const trainingDays = Math.min(daysPerWeek, 6); // Máximo 6 días
+  const restDays = 7 - trainingDays;
+  
+  let trainingDayCount = 0;
+  
+  for (let i = 0; i < 7; i++) {
+    const day = weekDays[i];
+    
+    if (trainingDayCount < trainingDays) {
+      // Crear un entrenamiento básico según el día
+      const workoutTypes = [
+        { name: "Tren superior", focus: "upper" },
+        { name: "Tren inferior", focus: "lower" },
+        { name: "Full body", focus: "full" },
+        { name: "Cardio + Core", focus: "cardio" },
+      ];
+      
+      const workoutType = workoutTypes[trainingDayCount % workoutTypes.length];
+      
+      workouts.push({
+        day,
+        name: workoutType.name,
+        duration: preferences.sessionTime,
+        focus: workoutType.focus,
+        intensity: "medium",
+        exercises: [
+          {
+            name: "Calentamiento",
+            sets: 1,
+            reps: "5 min",
+            rest: 0,
+            muscleGroups: ["calentamiento"],
+            equipment: []
+          },
+          {
+            name: "Ejercicio principal",
+            sets: 3,
+            reps: "10-12",
+            rest: 60,
+            muscleGroups: ["general"],
+            equipment: preferences.equipment === "none" ? [] : ["equipamiento"]
+          },
+          {
+            name: "Estiramiento",
+            sets: 1,
+            reps: "5 min",
+            rest: 0,
+            muscleGroups: ["flexibilidad"],
+            equipment: []
+          }
+        ]
+      });
+      trainingDayCount++;
+    } else {
+      // Día de descanso
+      workouts.push({
+        day,
+        name: "Descanso activo",
+        duration: 0,
+        focus: "rest",
+        intensity: "low",
+        exercises: []
+      });
+    }
+  }
+  
+  return workouts;
+}
+
 function calculateMuscleGroupVolume(weeklyStructure: any[]): { [key: string]: number } {
   const volume: { [key: string]: number } = {};
 

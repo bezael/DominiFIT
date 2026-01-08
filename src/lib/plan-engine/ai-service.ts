@@ -75,13 +75,15 @@ Se te proporciona una plantilla base que debes usar como referencia, pero puedes
 ## REQUISITOS TÉCNICOS
 
 ### ENTRENAMIENTO
-- Genera ${preferences.daysPerWeek} días de entrenamiento por semana
-- Cada sesión debe durar aproximadamente ${preferences.sessionTime} minutos
+- Genera los 7 días de la semana (Lun, Mar, Mié, Jue, Vie, Sáb, Dom)
+- De esos 7 días, ${preferences.daysPerWeek} deben ser días de entrenamiento activo
+- Los días restantes deben ser días de descanso (con focus: "rest" y sin ejercicios, o con ejercicios de recuperación suave)
+- Cada sesión de entrenamiento debe durar aproximadamente ${preferences.sessionTime} minutos
 - Incluye ejercicios específicos con: nombre, series, repeticiones, descanso (segundos), grupos musculares trabajados
 - Distribuye el volumen de entrenamiento de forma equilibrada
-- Incluye días de descanso apropiados
 - Para principiantes: enfócate en técnica y movimientos básicos
 - Para intermedios/avanzados: puedes incluir ejercicios más complejos
+- IMPORTANTE: Genera TODOS los 7 días, incluso los de descanso
 
 ### NUTRICIÓN
 - Genera un menú para los 7 días de la semana
@@ -290,7 +292,7 @@ export async function generatePlanWithAI(
         Authorization: `Bearer ${OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini", // o "gpt-4" para mejor calidad
+        model: "gpt-5-nano", // o "gpt-4" para mejor calidad
         messages: [
           {
             role: "system",
@@ -301,8 +303,7 @@ export async function generatePlanWithAI(
             content: prompt,
           },
         ],
-        temperature: 0.7,
-        max_tokens: 4000,
+        max_completion_tokens: 4000,
         response_format: { type: "json_object" }, // Fuerza respuesta JSON
       }),
     });
@@ -326,6 +327,18 @@ export async function generatePlanWithAI(
     const jsonString = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : content;
 
     const aiResponse: AIResponse = JSON.parse(jsonString);
+
+    console.log("✅ [generatePlanWithAI] Plan generado por IA:", {
+      hasTraining: !!aiResponse.training,
+      hasNutrition: !!aiResponse.nutrition,
+      trainingDays: aiResponse.training?.weeklyStructure?.length || 0,
+      nutritionDays: aiResponse.nutrition?.weeklyMenu?.length || 0,
+      trainingStructure: aiResponse.training?.weeklyStructure?.map(d => ({
+        day: d.day,
+        name: d.name,
+        exercisesCount: d.exercises?.length || 0
+      })) || []
+    });
 
     return aiResponse;
   } catch (error) {
@@ -363,12 +376,12 @@ export async function regeneratePlanWithAI(
   try {
     console.log("📤 [regeneratePlanWithAI] Enviando petición a OpenAI API...", {
       url: OPENAI_API_URL,
-      model: "gpt-4o-mini",
+      model: "gpt-5-nano",
       promptLength: prompt.length,
     });
     
     const requestBody = {
-      model: "gpt-4o-mini",
+      model: "gpt-5-nano",
       messages: [
         {
           role: "system",
@@ -379,8 +392,7 @@ export async function regeneratePlanWithAI(
           content: prompt,
         },
       ],
-      temperature: 0.7,
-      max_tokens: 4000,
+      max_completion_tokens: 4000,
       response_format: { type: "json_object" },
     };
 

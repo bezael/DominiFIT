@@ -80,6 +80,18 @@ const Onboarding = () => {
     if (step < TOTAL_STEPS - 1) {
       setStep(step + 1);
     } else {
+      // Guardar preferencias en localStorage antes de navegar
+      const preferences = {
+        goal,
+        daysPerWeek,
+        sessionTime,
+        equipment,
+        dietType,
+        allergies,
+        mealsPerDay,
+        style,
+      };
+      localStorage.setItem('onboarding_preferences', JSON.stringify(preferences));
       navigate("/loading");
     }
   };
