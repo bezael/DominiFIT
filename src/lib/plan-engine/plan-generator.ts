@@ -180,16 +180,6 @@ export async function regeneratePlan(
 ): Promise<WeeklyPlan> {
   const startTime = Date.now();
 
-  // 1. Actualizar preferencias con restricciones
-  const updatedPreferences: UserPreferences = {
-    ...existingPlan.preferences,
-    sessionTime: constraints.maxSessionTime || existingPlan.preferences.sessionTime,
-    allergies: [
-      ...existingPlan.preferences.allergies,
-      ...(constraints.excludeFoods || []),
-    ],
-  };
-
   // 2. Generar con IA aplicando restricciones
   let aiResponse;
   try {
@@ -212,10 +202,17 @@ export async function regeneratePlan(
 
   // 4. Aplicar cambios de entrenamiento
   if (aiResponse.training) {
-    regeneratedPlan.training.weeklyStructure = aiResponse.training.weeklyStructure;
-    regeneratedPlan.training.progression = aiResponse.training.progression;
+    // Normalizar la estructura: asegurar que todos los días tengan exercises como array
+    const normalizedStructure = aiResponse.training.weeklyStructure.map(day => ({
+      ...day,
+      exercises: Array.isArray(day.exercises) ? day.exercises : [],
+      muscleGroups: day.muscleGroups || [],
+    }));
+    
+    regeneratedPlan.training.weeklyStructure = normalizedStructure;
+    regeneratedPlan.training.progression = aiResponse.training.progression || regeneratedPlan.training.progression;
     regeneratedPlan.training.totalVolume = calculateMuscleGroupVolume(
-      aiResponse.training.weeklyStructure
+      normalizedStructure
     );
   }
 
@@ -223,16 +220,6 @@ export async function regeneratePlan(
   if (aiResponse.nutrition) {
     regeneratedPlan.nutrition.weeklyMenu = aiResponse.nutrition.weeklyMenu;
     regeneratedPlan.nutrition.mealPrepTips = aiResponse.nutrition.mealPrepTips;
-
-    // Ajustar calorías y macros si se especificó
-    if (constraints.maxCalories) {
-      regeneratedPlan.nutrition.dailyCalories = constraints.maxCalories;
-    }
-
-    if (constraints.minProtein && existingPlan.preferences.weight) {
-      regeneratedPlan.nutrition.macroTargets.protein =
-        existingPlan.preferences.weight * constraints.minProtein;
-    }
 
     // Recalcular desde el menú si está disponible
     const firstDay = aiResponse.nutrition.weeklyMenu[0];
@@ -243,6 +230,30 @@ export async function regeneratePlan(
         carbs: firstDay.carbs,
         fat: firstDay.fat,
       };
+    }
+
+    // Aplicar restricciones nutricionales solicitadas
+    if (constraints.maxCalories && regeneratedPlan.nutrition.dailyCalories) {
+      regeneratedPlan.nutrition.dailyCalories = Math.min(
+        regeneratedPlan.nutrition.dailyCalories,
+        constraints.maxCalories
+      );
+    }
+
+    if (constraints.minProtein && existingPlan.preferences.weight) {
+      const minProteinGrams =
+        existingPlan.preferences.weight * constraints.minProtein;
+      regeneratedPlan.nutrition.macroTargets.protein = Math.max(
+        regeneratedPlan.nutrition.macroTargets.protein || 0,
+        minProteinGrams
+      );
+    }
+
+    if (constraints.maxCarbs && regeneratedPlan.nutrition.macroTargets.carbs) {
+      regeneratedPlan.nutrition.macroTargets.carbs = Math.min(
+        regeneratedPlan.nutrition.macroTargets.carbs,
+        constraints.maxCarbs
+      );
     }
   }
 

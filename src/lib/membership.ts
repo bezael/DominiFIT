@@ -68,8 +68,9 @@ export async function hasActiveMembership(userId?: string): Promise<boolean> {
     const { data, error } = await supabase
       .from('sass_subscriptions')
       .select('*')
+      // Contar trial como acceso vigente
+      .in('status', ['active', 'trialing'])
       .eq('user_id', targetUserId)
-      .eq('status', 'active')
       .gt('current_period_end', new Date().toISOString())
       .eq('cancel_at_period_end', false)
       .maybeSingle();
@@ -157,7 +158,7 @@ export async function getMembershipStatus(userId?: string): Promise<MembershipSt
     );
 
     const hasActiveMembership = 
-      subscription.status === 'active' && 
+      ['active', 'trialing'].includes(subscription.status) && 
       periodEnd > now &&
       !subscription.cancel_at_period_end;
 

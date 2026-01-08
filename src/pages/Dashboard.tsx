@@ -1,11 +1,14 @@
-import { useState, useEffect } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
-import { Dumbbell, Utensils, TrendingUp, ChevronRight, Sparkles, Clock, Lock, LogOut } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import MobileFrame from "@/components/MobileFrame";
+import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import { useMembership } from "@/hooks/use-membership";
 import { syncSubscriptionWithStripe } from "@/lib/membership";
+import { regeneratePlan } from "@/lib/plan-engine";
+import type { DietType, EquipmentType, GoalType, PlanStyle, RegenerationConstraints, WeeklyPlan } from "@/lib/plan-engine/types";
+import { savePlan } from "@/lib/plans";
+import { ChevronRight, Clock, Dumbbell, Lock, LogOut, Sparkles, TrendingUp, Utensils } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
 type TabType = "training" | "nutrition" | "progress";
@@ -43,6 +46,7 @@ const Dashboard = () => {
   const [activeTab, setActiveTab] = useState<TabType>("training");
   const [showPremiumModal, setShowPremiumModal] = useState(false);
   const [showLogoutMenu, setShowLogoutMenu] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false);
 
   // Verificar si hay session_id en la URL (viene de Stripe después del pago)
   useEffect(() => {
@@ -101,6 +105,136 @@ const Dashboard = () => {
     }
   };
 
+  const handleRegenerate = async () => {
+    if (!isPremium) {
+      setShowPremiumModal(true);
+      return;
+    }
+
+    if (isRegenerating) return;
+
+    if (!user?.id) {
+      toast.error("No se pudo identificar el usuario");
+      return;
+    }
+
+    try {
+      setIsRegenerating(true);
+      
+      // Crear un plan temporal desde los datos mock para poder regenerarlo
+      // En producción, esto vendría de Supabase
+      const currentPlan: WeeklyPlan = {
+        id: `plan-${user.id}-1-${Date.now()}`,
+        userId: user.id,
+        weekNumber: 1,
+        createdAt: new Date().toISOString(),
+        version: 1,
+        preferences: {
+          goal: "fat-loss" as GoalType,
+          daysPerWeek: 4,
+          sessionTime: 45,
+          equipment: "gym" as EquipmentType,
+          dietType: "omnivore" as DietType,
+          allergies: [],
+          mealsPerDay: 4,
+          style: "simple" as PlanStyle,
+          weight: 70,
+          height: 175,
+          age: 30,
+          gender: "male",
+          activityLevel: "moderate",
+        },
+        training: {
+          weeklyStructure: mockWorkouts.map((w, idx) => ({
+            day: w.day,
+            name: w.name,
+            duration: w.duration,
+            focus: idx === 0 ? "upper" : idx === 3 ? "lower" : idx === 4 ? "full" : idx === 1 || idx === 5 ? "cardio" : "rest",
+            intensity: w.duration > 40 ? "high" : w.duration > 20 ? "medium" : "low",
+            exercises: [],
+          })),
+          totalVolume: {},
+          progression: "Progresión semanal estándar",
+        },
+        nutrition: {
+          dailyCalories: totalCalories,
+          macroTargets: {
+            protein: macros.protein,
+            carbs: macros.carbs,
+            fat: macros.fat,
+          },
+          weeklyMenu: weekDays.map((day) => ({
+            day,
+            totalCalories,
+            protein: macros.protein,
+            carbs: macros.carbs,
+            fat: macros.fat,
+            meals: mockMeals.map((m) => ({
+              name: m.name,
+              calories: m.calories,
+              protein: macros.protein / mockMeals.length,
+              carbs: macros.carbs / mockMeals.length,
+              fat: macros.fat / mockMeals.length,
+              description: m.description,
+              ingredients: [],
+            })),
+          })),
+        },
+        validation: {
+          passed: true,
+          warnings: [],
+          errors: [],
+          checks: [],
+        },
+        metadata: {
+          generatedBy: "template",
+        },
+      };
+
+      console.log("🔄 Iniciando regeneración de plan...", { userId: user.id });
+      
+      // Restricciones mínimas para regenerar (puedes personalizar esto)
+      const constraints: RegenerationConstraints = {
+        notes: "Regenerar plan con variaciones frescas manteniendo el mismo objetivo",
+      };
+
+      console.log("📤 Llamando a regeneratePlan con OpenAI...");
+      const regeneratedPlan = await regeneratePlan(currentPlan, constraints);
+      
+      console.log("✅ Plan regenerado exitosamente:", {
+        id: regeneratedPlan.id,
+        version: regeneratedPlan.version,
+        generatedBy: regeneratedPlan.metadata.generatedBy,
+        aiModel: regeneratedPlan.metadata.aiModel,
+        validationPassed: regeneratedPlan.validation.passed,
+      });
+
+      // Guardar el plan regenerado en Supabase
+      console.log("💾 Guardando plan regenerado en Supabase...");
+      const { data: savedPlan, error: saveError } = await savePlan(regeneratedPlan);
+      
+      if (saveError) {
+        console.error("⚠️ Error al guardar plan:", saveError);
+        toast.warning("Plan regenerado pero no se pudo guardar", {
+          description: "El plan se regeneró correctamente pero hubo un problema al guardarlo. Intenta de nuevo.",
+        });
+      } else {
+        console.log("✅ Plan guardado exitosamente en Supabase");
+        toast.success("Plan regenerado y guardado", {
+          description: `Tu plan se ha actualizado con nuevas recomendaciones (v${regeneratedPlan.version}).`,
+        });
+      }
+    } catch (error) {
+      console.error("❌ Error al regenerar plan:", error);
+      const errorMessage = error instanceof Error ? error.message : "Error desconocido";
+      toast.error("No se pudo regenerar el plan", {
+        description: errorMessage,
+      });
+    } finally {
+      setIsRegenerating(false);
+    }
+  };
+
   const handleLogout = async () => {
     try {
       await signOut();
@@ -140,14 +274,12 @@ const Dashboard = () => {
                 <Button 
                   variant="premium" 
                   size="sm"
-                  onClick={() => {
-                    // Si es premium, permitir regenerar directamente
-                    toast.info("Función de regeneración disponible para Premium");
-                  }}
+                  onClick={handleRegenerate}
+                  disabled={isRegenerating}
                   className="gap-2"
                 >
                   <Sparkles className="w-4 h-4" />
-                  Regenerar
+                  {isRegenerating ? "Regenerando..." : "Regenerar"}
                 </Button>
               ) : (
                 <Button 

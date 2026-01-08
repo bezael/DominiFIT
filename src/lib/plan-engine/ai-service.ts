@@ -349,35 +349,59 @@ export async function regeneratePlanWithAI(
     );
   }
 
-  const prompt = buildRegenerationPrompt(existingPlan, constraints);
+  console.log("🤖 [regeneratePlanWithAI] Iniciando regeneración con OpenAI...");
+  console.log("📋 Plan existente:", {
+    id: existingPlan.id,
+    userId: existingPlan.userId,
+    weekNumber: existingPlan.weekNumber,
+    version: existingPlan.version,
+  });
+  console.log("⚙️ Restricciones:", constraints);
 
+  const prompt = buildRegenerationPrompt(existingPlan, constraints);
+  
   try {
+    console.log("📤 [regeneratePlanWithAI] Enviando petición a OpenAI API...", {
+      url: OPENAI_API_URL,
+      model: "gpt-4o-mini",
+      promptLength: prompt.length,
+    });
+    
+    const requestBody = {
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: "Eres un experto en fitness y nutrición. Ajustas planes existentes aplicando restricciones específicas del usuario.",
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+      temperature: 0.7,
+      max_tokens: 4000,
+      response_format: { type: "json_object" },
+    };
+
     const response = await fetch(OPENAI_API_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${OPENAI_API_KEY}`,
       },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content: "Eres un experto en fitness y nutrición. Ajustas planes existentes aplicando restricciones específicas del usuario.",
-          },
-          {
-            role: "user",
-            content: prompt,
-          },
-        ],
-        temperature: 0.7,
-        max_tokens: 4000,
-        response_format: { type: "json_object" },
-      }),
+      body: JSON.stringify(requestBody),
+    });
+
+    console.log("📥 [regeneratePlanWithAI] Respuesta recibida:", {
+      status: response.status,
+      statusText: response.statusText,
+      ok: response.ok,
     });
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
+      console.error("❌ [regeneratePlanWithAI] Error en respuesta de OpenAI:", errorData);
       throw new Error(
         `Error en API de OpenAI: ${response.status} - ${errorData.error?.message || response.statusText}`
       );
@@ -386,6 +410,12 @@ export async function regeneratePlanWithAI(
     const data = await response.json();
     const content = data.choices[0]?.message?.content;
 
+    console.log("✅ [regeneratePlanWithAI] Contenido recibido:", {
+      hasContent: !!content,
+      contentLength: content?.length || 0,
+      usage: data.usage,
+    });
+
     if (!content) {
       throw new Error("No se recibió contenido de la API");
     }
@@ -393,7 +423,15 @@ export async function regeneratePlanWithAI(
     const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/) || content.match(/\{[\s\S]*\}/);
     const jsonString = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : content;
 
+    console.log("🔍 [regeneratePlanWithAI] Parseando JSON...");
     const aiResponse: AIResponse = JSON.parse(jsonString);
+    
+    console.log("✨ [regeneratePlanWithAI] Plan regenerado exitosamente:", {
+      hasTraining: !!aiResponse.training,
+      hasNutrition: !!aiResponse.nutrition,
+      trainingDays: aiResponse.training?.weeklyStructure?.length || 0,
+      nutritionDays: aiResponse.nutrition?.weeklyMenu?.length || 0,
+    });
 
     return aiResponse;
   } catch (error) {

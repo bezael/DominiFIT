@@ -226,12 +226,22 @@ function validateTraining(
   const muscleGroupVolume: { [key: string]: number } = {};
   
   training.weeklyStructure.forEach(day => {
+    // Validar que exercises existe y es un array
+    if (!day.exercises || !Array.isArray(day.exercises)) {
+      return; // Saltar días sin ejercicios o con estructura inválida
+    }
+    
     day.exercises.forEach(exercise => {
+      // Validar que exercise tiene las propiedades necesarias
+      if (!exercise || !exercise.muscleGroups || !Array.isArray(exercise.muscleGroups)) {
+        return; // Saltar ejercicios sin grupos musculares
+      }
+      
       exercise.muscleGroups.forEach(muscle => {
         if (!muscleGroupVolume[muscle]) {
           muscleGroupVolume[muscle] = 0;
         }
-        muscleGroupVolume[muscle] += exercise.sets;
+        muscleGroupVolume[muscle] += exercise.sets || 0;
       });
     });
   });
@@ -266,9 +276,15 @@ function validateTraining(
     }
 
     // Validar coherencia entre duración estimada y ejercicios
+    if (!day.exercises || !Array.isArray(day.exercises) || day.exercises.length === 0) {
+      // Si no hay ejercicios, no validar tiempo estimado
+      return;
+    }
+    
     const estimatedTime = day.exercises.reduce((total, ex) => {
-      const setsTime = ex.sets * (parseInt(ex.reps) || 30); // segundos aproximados
-      const restTime = ex.sets * ex.rest;
+      if (!ex) return total;
+      const setsTime = (ex.sets || 0) * (parseInt(ex.reps) || 30); // segundos aproximados
+      const restTime = (ex.sets || 0) * (ex.rest || 60);
       return total + setsTime + restTime;
     }, 0) / 60; // convertir a minutos
 
