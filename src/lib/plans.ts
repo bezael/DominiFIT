@@ -8,7 +8,7 @@
  */
 
 import { supabase } from './supabase';
-import type { WeeklyPlan } from './plan-engine/types';
+import type { WeeklyPlan, DailyNutrition, Meal } from './plan-engine/types';
 
 /**
  * Guarda un plan semanal en Supabase
@@ -201,6 +201,85 @@ export async function getLatestPlan(userId: string): Promise<{ data: WeeklyPlan 
       nutritionData: planData.nutrition
     });
 
+    // Asegurar que nutrition tenga la estructura correcta
+    let nutrition = planData.nutrition;
+    if (nutrition) {
+      // Si nutrition es un string (JSONB sin parsear), parsearlo
+      if (typeof nutrition === 'string') {
+        try {
+          nutrition = JSON.parse(nutrition);
+        } catch (e) {
+          console.warn('⚠️ [getLatestPlan] Error al parsear nutrition como JSON:', e);
+        }
+      }
+      
+      // Validar y normalizar estructura mínima
+      if (!nutrition.weeklyMenu || !Array.isArray(nutrition.weeklyMenu)) {
+        console.warn('⚠️ [getLatestPlan] nutrition.weeklyMenu no es un array válido:', {
+          hasWeeklyMenu: !!nutrition.weeklyMenu,
+          weeklyMenuType: typeof nutrition.weeklyMenu,
+          nutritionKeys: Object.keys(nutrition)
+        });
+        // Asegurar que weeklyMenu sea un array
+        nutrition = {
+          ...nutrition,
+          weeklyMenu: Array.isArray(nutrition.weeklyMenu) ? nutrition.weeklyMenu : []
+        };
+      } else {
+        // Normalizar días y estructura de comidas si es necesario
+        nutrition.weeklyMenu = nutrition.weeklyMenu.map((day: any) => {
+          // Si el día está en inglés, normalizarlo
+          const dayMap: { [key: string]: string } = {
+            "Monday": "Lun", "Tuesday": "Mar", "Wednesday": "Mié",
+            "Thursday": "Jue", "Friday": "Vie", "Saturday": "Sáb", "Sunday": "Dom"
+          };
+          
+          if (dayMap[day.day]) {
+            day.day = dayMap[day.day];
+          }
+          
+          // Si las comidas tienen estructura diferente (meal/items), normalizarlas
+          if (day.meals && Array.isArray(day.meals)) {
+            const needsNormalization = day.meals.some((m: any) => m.meal && m.items);
+            
+            if (needsNormalization) {
+              const mealMap: { [key: string]: string } = {
+                "Breakfast": "Desayuno", "Lunch": "Almuerzo",
+                "Dinner": "Cena", "Snack": "Merienda", "Snacks": "Merienda"
+              };
+              
+              day.meals = day.meals.map((meal: any) => {
+                if (meal.meal && meal.items) {
+                  const mealName = mealMap[meal.meal] || meal.meal;
+                  const items = Array.isArray(meal.items) ? meal.items : [String(meal.items)];
+                  const description = items.join(", ");
+                  
+                  // Calcular valores aproximados si no existen
+                  const caloriesPerMeal = day.totalCalories ? Math.round(day.totalCalories / day.meals.length) : 0;
+                  const proteinPerMeal = day.protein ? Math.round(day.protein / day.meals.length) : 0;
+                  const carbsPerMeal = day.carbs ? Math.round(day.carbs / day.meals.length) : 0;
+                  const fatPerMeal = day.fat ? Math.round(day.fat / day.meals.length) : 0;
+                  
+                  return {
+                    name: mealName,
+                    calories: meal.calories || caloriesPerMeal,
+                    protein: meal.protein || proteinPerMeal,
+                    carbs: meal.carbs || carbsPerMeal,
+                    fat: meal.fat || fatPerMeal,
+                    description: meal.description || description,
+                    ingredients: meal.ingredients || items
+                  };
+                }
+                return meal;
+              });
+            }
+          }
+          
+          return day;
+        });
+      }
+    }
+
     // Convertir a WeeklyPlan
     const plan: WeeklyPlan = {
       id: planData.id,
@@ -211,7 +290,7 @@ export async function getLatestPlan(userId: string): Promise<{ data: WeeklyPlan 
       preferences: planData.preferences,
       constraints: planData.constraints,
       training: planData.training,
-      nutrition: planData.nutrition,
+      nutrition: nutrition,
       validation: planData.validation,
       metadata: planData.metadata,
     };
@@ -228,14 +307,19 @@ export async function getLatestPlan(userId: string): Promise<{ data: WeeklyPlan 
         exercisesCount: d.exercises?.length || 0
       })) || [],
       hasNutrition: !!plan.nutrition,
+      nutritionType: typeof plan.nutrition,
+      nutritionKeys: plan.nutrition ? Object.keys(plan.nutrition) : [],
       nutritionDays: plan.nutrition?.weeklyMenu?.length || 0,
       nutritionStructure: plan.nutrition?.weeklyMenu?.map(d => ({
         day: d.day,
         totalCalories: d.totalCalories,
-        mealsCount: d.meals?.length || 0
+        mealsCount: d.meals?.length || 0,
+        hasMeals: !!d.meals,
+        mealsType: typeof d.meals
       })) || [],
       dailyCalories: plan.nutrition?.dailyCalories,
-      macroTargets: plan.nutrition?.macroTargets
+      macroTargets: plan.nutrition?.macroTargets,
+      fullNutrition: plan.nutrition
     });
 
     return { data: plan, error: null };

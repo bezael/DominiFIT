@@ -167,6 +167,9 @@ IMPORTANTE:
 - Asegúrate de que el JSON sea válido
 - Completa los 7 días de la semana para nutrición
 - Completa todos los días solicitados para entrenamiento
+- Los días de la semana DEBEN estar en español: "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom" (NO uses "Monday", "Tuesday", etc.)
+- Los nombres de las comidas DEBEN estar en español: "Desayuno", "Almuerzo", "Cena", "Merienda" (NO uses "Breakfast", "Lunch", etc.)
+- Cada comida DEBE tener: name, calories, protein, carbs, fat, description, ingredients (como array)
 `;
 
   return prompt;

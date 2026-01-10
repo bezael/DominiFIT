@@ -6,12 +6,13 @@ import { syncSubscriptionWithStripe } from "@/lib/membership";
 import { regeneratePlan } from "@/lib/plan-engine";
 import type { RegenerationConstraints, WeeklyPlan } from "@/lib/plan-engine/types";
 import { getLatestPlan, savePlan } from "@/lib/plans";
-import { ChevronRight, Clock, Dumbbell, Lock, LogOut, Sparkles, TrendingUp, Utensils } from "lucide-react";
+import { getRecommendedSupplements, type Supplement } from "@/lib/supplements";
+import { ChevronRight, Clock, Dumbbell, Lock, LogOut, Pill, Sparkles, TrendingUp, Utensils } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 
-type TabType = "training" | "nutrition" | "progress";
+type TabType = "training" | "nutrition" | "progress" | "supplements";
 
 const weekDays = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
 
@@ -213,7 +214,13 @@ const Dashboard = () => {
     { id: "training" as TabType, label: "Entreno", icon: Dumbbell },
     { id: "nutrition" as TabType, label: "Nutrición", icon: Utensils },
     { id: "progress" as TabType, label: "Progreso", icon: TrendingUp },
+    { id: "supplements" as TabType, label: "Suplementos", icon: Pill },
   ];
+
+  // Obtener suplementos recomendados según el objetivo del usuario
+  const recommendedSupplements = currentPlan?.preferences?.goal 
+    ? getRecommendedSupplements(currentPlan.preferences.goal as "fat-loss" | "muscle" | "maintain" | "performance")
+    : [];
 
   // Extraer datos del plan actual
   // Filtrar solo días con entrenos (excluir días de descanso sin ejercicios)
@@ -229,16 +236,41 @@ const Dashboard = () => {
   
   // Obtener nutrición del día actual o el primer día disponible
   const weeklyMenu = currentPlan?.nutrition?.weeklyMenu || [];
+  
+  console.log("🔍 [Dashboard] Buscando nutrición:", {
+    hasNutrition: !!currentPlan?.nutrition,
+    hasWeeklyMenu: !!currentPlan?.nutrition?.weeklyMenu,
+    weeklyMenuLength: weeklyMenu.length,
+    weeklyMenuDays: weeklyMenu.map(d => d.day),
+    todayDay,
+    weeklyMenuFull: weeklyMenu
+  });
+  
   let todayNutrition = weeklyMenu.find(day => day.day === todayDay) || null;
   
   // Si no hay datos para hoy, usar el primer día disponible
   if (!todayNutrition && weeklyMenu.length > 0) {
     todayNutrition = weeklyMenu[0];
+    console.log("ℹ️ [Dashboard] No se encontró nutrición para hoy, usando:", todayNutrition?.day);
   }
   
   const meals = todayNutrition?.meals || [];
   const totalCalories = todayNutrition?.totalCalories || currentPlan?.nutrition?.dailyCalories || 0;
   const macros = currentPlan?.nutrition?.macroTargets || { protein: 0, carbs: 0, fat: 0 };
+  
+  console.log("🍽️ [Dashboard] Nutrición del día:", {
+    todayNutrition: todayNutrition ? {
+      day: todayNutrition.day,
+      totalCalories: todayNutrition.totalCalories,
+      hasMeals: !!todayNutrition.meals,
+      mealsType: typeof todayNutrition.meals,
+      mealsLength: todayNutrition.meals?.length || 0,
+      meals: todayNutrition.meals
+    } : null,
+    mealsCount: meals.length,
+    totalCalories,
+    macros
+  });
   
   // Debug: Log para verificar datos
   useEffect(() => {
@@ -514,11 +546,35 @@ const Dashboard = () => {
 
                       <div>
                         <label className="text-sm text-muted-foreground mb-2 block">Macros aproximados</label>
-                        <div className="space-y-2">
-                          <MacroBar label="Proteína" value={macros.protein} max={macros.protein * 1.2} unit="g" color="bg-primary" />
-                          <MacroBar label="Carbos" value={macros.carbs} max={macros.carbs * 1.2} unit="g" color="bg-warning" />
-                          <MacroBar label="Grasas" value={macros.fat} max={macros.fat * 1.2} unit="g" color="bg-accent-foreground" />
-                        </div>
+                        {macros.protein > 0 || macros.carbs > 0 || macros.fat > 0 ? (
+                          <div className="space-y-2">
+                            <MacroBar 
+                              label="Proteína" 
+                              value={macros.protein || 0} 
+                              max={Math.max(macros.protein * 1.2, macros.protein || 100)} 
+                              unit="g" 
+                              color="bg-primary" 
+                            />
+                            <MacroBar 
+                              label="Carbos" 
+                              value={macros.carbs || 0} 
+                              max={Math.max(macros.carbs * 1.2, macros.carbs || 100)} 
+                              unit="g" 
+                              color="bg-warning" 
+                            />
+                            <MacroBar 
+                              label="Grasas" 
+                              value={macros.fat || 0} 
+                              max={Math.max(macros.fat * 1.2, macros.fat || 100)} 
+                              unit="g" 
+                              color="bg-accent-foreground" 
+                            />
+                          </div>
+                        ) : (
+                          <p className="text-sm text-muted-foreground py-4 text-center">
+                            Completa tu plan para ver tus macros objetivo
+                          </p>
+                        )}
                       </div>
 
                       <Button size="full" variant="success">
@@ -526,6 +582,32 @@ const Dashboard = () => {
                       </Button>
                     </div>
                   </div>
+                </div>
+              )}
+
+              {activeTab === "supplements" && (
+                <div className="space-y-6 animate-fade-in">
+                  <div className="bg-card rounded-xl p-4 shadow-card">
+                    <h3 className="font-semibold mb-2">Suplementos recomendados</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Basados en tu objetivo: {currentPlan?.preferences?.goal === "fat-loss" ? "Pérdida de grasa" : 
+                        currentPlan?.preferences?.goal === "muscle" ? "Ganancia muscular" :
+                        currentPlan?.preferences?.goal === "maintain" ? "Mantenimiento" : "Rendimiento"}
+                    </p>
+                  </div>
+
+                  {recommendedSupplements.length === 0 ? (
+                    <div className="bg-card rounded-xl p-4 shadow-card text-center py-8">
+                      <p className="text-muted-foreground mb-4">No hay suplementos recomendados disponibles</p>
+                      <p className="text-sm text-muted-foreground">Completa tu plan para obtener recomendaciones personalizadas</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {recommendedSupplements.map((supplement) => (
+                        <SupplementCard key={supplement.id} supplement={supplement} />
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </>
@@ -629,13 +711,18 @@ const MacroBar = ({ label, value, max, unit, color }: {
   unit: string;
   color: string;
 }) => {
-  const percentage = Math.min((value / max) * 100, 100);
+  // Asegurar que max nunca sea 0 para evitar división por cero
+  const safeMax = max > 0 ? max : 100;
+  const safeValue = value || 0;
+  const percentage = Math.min((safeValue / safeMax) * 100, 100);
   
   return (
     <div>
       <div className="flex justify-between text-sm mb-1">
         <span className="text-muted-foreground">{label}</span>
-        <span className="font-medium">{value}/{max}{unit}</span>
+        <span className="font-medium">
+          {safeValue.toFixed(0)}/{safeMax.toFixed(0)}{unit}
+        </span>
       </div>
       <div className="h-2 bg-muted rounded-full overflow-hidden">
         <div 
@@ -643,6 +730,82 @@ const MacroBar = ({ label, value, max, unit, color }: {
           style={{ width: `${percentage}%` }}
         />
       </div>
+    </div>
+  );
+};
+
+const SupplementCard = ({ supplement }: { supplement: Supplement }) => {
+  const categoryLabels: { [key: string]: string } = {
+    "protein": "Proteína",
+    "creatine": "Creatina",
+    "vitamins": "Vitaminas",
+    "pre-workout": "Pre-entrenamiento",
+    "recovery": "Recuperación",
+    "other": "Otros"
+  };
+
+  const categoryColors: { [key: string]: string } = {
+    "protein": "bg-blue-500/10 text-blue-500",
+    "creatine": "bg-purple-500/10 text-purple-500",
+    "vitamins": "bg-green-500/10 text-green-500",
+    "pre-workout": "bg-orange-500/10 text-orange-500",
+    "recovery": "bg-pink-500/10 text-pink-500",
+    "other": "bg-gray-500/10 text-gray-500"
+  };
+
+  return (
+    <div className="bg-card rounded-xl p-4 shadow-card border border-border hover:border-primary/30 transition-all">
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex-1">
+          <div className="flex items-center gap-2 mb-2">
+            <span className={`px-2 py-1 rounded-full text-xs font-medium ${categoryColors[supplement.category] || categoryColors.other}`}>
+              {categoryLabels[supplement.category] || "Otros"}
+            </span>
+            {supplement.rating && (
+              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                <span>⭐</span>
+                <span>{supplement.rating}</span>
+              </div>
+            )}
+          </div>
+          <h4 className="font-semibold text-lg mb-1">{supplement.name}</h4>
+          <p className="text-sm text-muted-foreground mb-3">{supplement.description}</p>
+        </div>
+      </div>
+
+      {supplement.benefits && supplement.benefits.length > 0 && (
+        <div className="mb-4">
+          <p className="text-xs font-medium text-muted-foreground mb-2">Beneficios:</p>
+          <ul className="space-y-1">
+            {supplement.benefits.map((benefit, index) => (
+              <li key={index} className="text-sm text-muted-foreground flex items-start gap-2">
+                <span className="text-primary mt-1">•</span>
+                <span>{benefit}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <a
+        href={supplement.affiliateLink}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="block w-full"
+      >
+        <Button 
+          variant="premium" 
+          size="full"
+          className="gap-2"
+        >
+          Ver en Amazon
+          <ChevronRight className="w-4 h-4" />
+        </Button>
+      </a>
+      
+      <p className="text-xs text-muted-foreground text-center mt-2">
+        Enlace de afiliado - Apoyas el proyecto sin costo adicional
+      </p>
     </div>
   );
 };

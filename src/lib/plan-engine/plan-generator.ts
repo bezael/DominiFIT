@@ -11,7 +11,9 @@ import {
   RegenerationConstraints,
   UserPreferences,
   WeeklyPlan,
-  WorkoutDay
+  WorkoutDay,
+  DailyNutrition,
+  Meal
 } from "./types";
 import { autoFixPlan, defaultValidationRules, isPlanValid, validatePlan } from "./validations";
 
@@ -138,21 +140,33 @@ export async function generateWeeklyPlan(
             totalCalories: d.totalCalories,
             mealsCount: d.meals?.length || 0
           })),
-          hasMealPrepTips: !!aiResponse.nutrition.mealPrepTips
+          hasMealPrepTips: !!aiResponse.nutrition.mealPrepTips,
+          rawNutrition: aiResponse.nutrition
         });
         
-        plan.nutrition.weeklyMenu = aiResponse.nutrition.weeklyMenu;
-        plan.nutrition.mealPrepTips = aiResponse.nutrition.mealPrepTips;
+        // Normalizar la nutrición de OpenAI al formato esperado
+        const normalizedMenu = normalizeNutritionResponse(
+          aiResponse.nutrition,
+          plan.nutrition.dailyCalories,
+          plan.nutrition.macroTargets
+        );
+        
+        if (normalizedMenu.length > 0) {
+          plan.nutrition.weeklyMenu = normalizedMenu;
+          plan.nutrition.mealPrepTips = aiResponse.nutrition.mealPrepTips;
 
-        // Recalcular macros desde el menú generado
-        const firstDay = aiResponse.nutrition.weeklyMenu[0];
-        if (firstDay) {
-          plan.nutrition.dailyCalories = firstDay.totalCalories;
-          plan.nutrition.macroTargets = {
-            protein: firstDay.protein,
-            carbs: firstDay.carbs,
-            fat: firstDay.fat,
-          };
+          // Recalcular macros desde el menú normalizado
+          const firstDay = normalizedMenu[0];
+          if (firstDay) {
+            plan.nutrition.dailyCalories = firstDay.totalCalories;
+            plan.nutrition.macroTargets = {
+              protein: firstDay.protein,
+              carbs: firstDay.carbs,
+              fat: firstDay.fat,
+            };
+          }
+        } else {
+          console.warn("⚠️ [generateWeeklyPlan] No se pudo normalizar la nutrición de IA");
         }
       } else {
         console.warn("⚠️ [generateWeeklyPlan] La respuesta de IA no incluye nutrición válida:", {
@@ -302,21 +316,33 @@ export async function regeneratePlan(
         day: d.day,
         totalCalories: d.totalCalories,
         mealsCount: d.meals?.length || 0
-      }))
+      })),
+      rawNutrition: aiResponse.nutrition
     });
     
-    regeneratedPlan.nutrition.weeklyMenu = aiResponse.nutrition.weeklyMenu;
-    regeneratedPlan.nutrition.mealPrepTips = aiResponse.nutrition.mealPrepTips;
+    // Normalizar la nutrición de OpenAI al formato esperado
+    const normalizedMenu = normalizeNutritionResponse(
+      aiResponse.nutrition,
+      regeneratedPlan.nutrition.dailyCalories,
+      regeneratedPlan.nutrition.macroTargets
+    );
+    
+    if (normalizedMenu.length > 0) {
+      regeneratedPlan.nutrition.weeklyMenu = normalizedMenu;
+      regeneratedPlan.nutrition.mealPrepTips = aiResponse.nutrition.mealPrepTips;
 
-    // Recalcular desde el menú si está disponible
-    const firstDay = aiResponse.nutrition.weeklyMenu[0];
-    if (firstDay) {
-      regeneratedPlan.nutrition.dailyCalories = firstDay.totalCalories;
-      regeneratedPlan.nutrition.macroTargets = {
-        protein: firstDay.protein,
-        carbs: firstDay.carbs,
-        fat: firstDay.fat,
-      };
+      // Recalcular desde el menú normalizado
+      const firstDay = normalizedMenu[0];
+      if (firstDay) {
+        regeneratedPlan.nutrition.dailyCalories = firstDay.totalCalories;
+        regeneratedPlan.nutrition.macroTargets = {
+          protein: firstDay.protein,
+          carbs: firstDay.carbs,
+          fat: firstDay.fat,
+        };
+      }
+    } else {
+      console.warn("⚠️ [regeneratePlan] No se pudo normalizar la nutrición regenerada");
     }
 
     // Aplicar restricciones nutricionales solicitadas
@@ -383,6 +409,106 @@ export async function regeneratePlan(
 // ============================================================================
 // FUNCIONES AUXILIARES
 // ============================================================================
+
+/**
+ * Normaliza los días de la semana de inglés a español
+ */
+function normalizeDayName(day: string): string {
+  const dayMap: { [key: string]: string } = {
+    "Monday": "Lun",
+    "Tuesday": "Mar",
+    "Wednesday": "Mié",
+    "Thursday": "Jue",
+    "Friday": "Vie",
+    "Saturday": "Sáb",
+    "Sunday": "Dom",
+    "Mon": "Lun",
+    "Tue": "Mar",
+    "Wed": "Mié",
+    "Thu": "Jue",
+    "Fri": "Vie",
+    "Sat": "Sáb",
+    "Sun": "Dom"
+  };
+  return dayMap[day] || day;
+}
+
+/**
+ * Normaliza los nombres de comidas de inglés a español
+ */
+function normalizeMealName(meal: string): string {
+  const mealMap: { [key: string]: string } = {
+    "Breakfast": "Desayuno",
+    "Lunch": "Almuerzo",
+    "Dinner": "Cena",
+    "Snack": "Merienda",
+    "Snacks": "Merienda"
+  };
+  return mealMap[meal] || meal;
+}
+
+/**
+ * Normaliza la nutrición de OpenAI al formato esperado
+ */
+function normalizeNutritionResponse(
+  aiNutrition: any,
+  dailyCalories: number,
+  macroTargets: { protein: number; carbs: number; fat: number }
+): DailyNutrition[] {
+  if (!aiNutrition || !aiNutrition.weeklyMenu || !Array.isArray(aiNutrition.weeklyMenu)) {
+    return [];
+  }
+
+  const normalizedMenu: DailyNutrition[] = aiNutrition.weeklyMenu.map((day: any) => {
+    // Normalizar día
+    const normalizedDay = normalizeDayName(day.day || "");
+
+    // Normalizar comidas
+    const normalizedMeals: Meal[] = [];
+    if (day.meals && Array.isArray(day.meals)) {
+      day.meals.forEach((meal: any, index: number) => {
+        const mealName = normalizeMealName(meal.meal || `Comida ${index + 1}`);
+        const items = meal.items || [];
+        const description = Array.isArray(items) ? items.join(", ") : String(items);
+        
+        // Calcular calorías y macros aproximados por comida
+        // Distribuir las calorías diarias entre las comidas
+        const mealsCount = day.meals.length;
+        const caloriesPerMeal = Math.round(dailyCalories / mealsCount);
+        const proteinPerMeal = Math.round(macroTargets.protein / mealsCount);
+        const carbsPerMeal = Math.round(macroTargets.carbs / mealsCount);
+        const fatPerMeal = Math.round(macroTargets.fat / mealsCount);
+
+        normalizedMeals.push({
+          name: mealName,
+          calories: caloriesPerMeal,
+          protein: proteinPerMeal,
+          carbs: carbsPerMeal,
+          fat: fatPerMeal,
+          description: description,
+          ingredients: Array.isArray(items) ? items : [String(items)]
+        });
+      });
+    }
+
+    // Calcular totales del día
+    const totalCalories = normalizedMeals.reduce((sum, m) => sum + m.calories, 0);
+    const totalProtein = normalizedMeals.reduce((sum, m) => sum + m.protein, 0);
+    const totalCarbs = normalizedMeals.reduce((sum, m) => sum + m.carbs, 0);
+    const totalFat = normalizedMeals.reduce((sum, m) => sum + m.fat, 0);
+
+    return {
+      day: normalizedDay,
+      totalCalories: totalCalories || dailyCalories,
+      protein: totalProtein || macroTargets.protein,
+      carbs: totalCarbs || macroTargets.carbs,
+      fat: totalFat || macroTargets.fat,
+      meals: normalizedMeals
+    };
+  });
+
+  return normalizedMenu;
+}
 
 /**
  * Calcula el volumen total (series) por grupo muscular
